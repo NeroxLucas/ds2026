@@ -1,0 +1,62 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\title{TCP File Transfer Using TCP Sockets}
+\author{Dang Quang Minh - 23BI14304}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+The goal of this practical work is to implement a simple 1-to-1 TCP file transfer system using C. The client sends a file to the server, which receives and stores it locally. The program is executed via command-line interface (CLI).
+
+\section{System Architecture}
+The system follows the client-server model. The server listens on a fixed port (9000). The client connects to the server and initiates a file transfer. The server accepts the connection, receives file and its content, and stores the received file.
+
+\section{Protocol Design}
+A custom lightweight protocol is used to transmit the file:
+\begin{enumerate}
+    \item Client sends filename length (4 bytes, integer)
+    \item Client sends filename (string)
+    \item Client sends file size (8 bytes, long long)
+    \item Client sends file content in chunks
+    \item Server writes data to disk
+\end{enumerate}
+
+TCP is a stream protocol, so metadata is necessary to help the server understand incoming data.
+
+\section{Client Implementation}
+The client code performs the following:
+\begin{itemize}
+    \item Opens a TCP socket
+    \item Connects to the server
+    \item Opens the file to send
+    \item Sends metadata: filename length, filename, file size
+    \item Sends file content
+    \item Closes connection
+\end{itemize}
+
+\section{Server Implementation}
+The server code:
+\begin{itemize}
+    \item Creates a TCP socket
+    \item Binds to port 9000
+    \item Listens for incoming connections
+    \item Accepts a client connection
+    \item Receives metadata and file content
+    \item Saves the received file
+    \item Closes socket
+\end{itemize}
+
+\section{Flow Diagram}
+This figure below shows the communication flow between client and server.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\textwidth]{diagram.png}
+\caption{Client--Server Interaction Protocol}
+\label{fig:diagram}
+\end{figure}
+
+
+\end{document}
