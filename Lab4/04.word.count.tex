@@ -1,0 +1,172 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{tikz}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{Practical Work 4: Word Count}
+\author{Dang Quang Minh - 23BI14304}
+\date{\today}
+
+\lstset{
+basicstyle=\ttfamily\small,
+breaklines=true,
+frame=single,
+numbers=left,
+numberstyle=\tiny,
+showstringspaces=false,
+tabsize=2
+}
+
+\begin{document}
+
+\maketitle
+
+\section*{What / Why / How}
+\subsection*{What}
+Implement a MapReduce-based Word Count program that processes a large text file and outputs the number of occurrences for each word.
+
+\subsection*{Why}
+Word Count is the canonical example used to introduce the MapReduce programming model. It demonstrates:
+\begin{itemize}
+\item How large text datasets can be parallelized.
+\item How simple key--value mappings scale across distributed systems.
+\item How Hadoop Streaming simplifies development by allowing non-Java code.
+\end{itemize}
+
+\subsection*{How}
+The system uses Python Mapper/Reducer scripts executed by Hadoop Streaming. The Mapper converts each input line into (word, 1) pairs, while the Reducer aggregates counts for each word after the framework performs shuffle and sort.
+
+\section{Choice of MapReduce implementation}
+For this lab I used \textbf{Hadoop Streaming} with small Python scripts for the Mapper and Reducer. The reasons:
+\begin{itemize}
+\item Hadoop Streaming makes it easy to write Mappers/Reducers in any language (Python here) and run them on Hadoop without Java coding.
+\item Python keeps the code compact and easy to read; good for demonstration and debugging on a single machine before scaling.
+\item The same mapper/reducer pair will work on a single-node test and on a Hadoop cluster without changes.
+\end{itemize}
+
+\section{How the Mapper and Reducer work}
+\subsection{Overview}
+The implementation follows the traditional pattern:
+\begin{enumerate}
+\item \textbf{Mapper:} For each input line, normalize the text (lowercase, remove punctuation), split into tokens (words), and for each word output `word\t1'' to stdout.
+  \item \textbf{Shuffle/Sort:} The framework (Hadoop Streaming) groups records by key (word) and ensures that all values for a given key are delivered to the same Reducer, in sorted order.
+  \item \textbf{Reducer:} For each key (word), sum the incoming integer values and emit `word\tcount''.
+\end{enumerate}
+
+\subsection{Mapper (mapper.py)}
+\begin{lstlisting}[language=Python,caption=mapper.py]
+#!/usr/bin/env python3
+import sys
+import re
+
+WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+for line in sys.stdin:
+line = line.strip().lower()
+for word in WORD_RE.findall(line):
+print(f"{word}\t1")
+\end{lstlisting}
+
+\subsection{Reducer (reducer.py)}
+\begin{lstlisting}[language=Python,caption=reducer.py]
+#!/usr/bin/env python3
+import sys
+
+current_word = None
+current_count = 0
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+
+    word, count = line.split('\t', 1)
+
+    try:
+        count = int(count)
+    except ValueError:
+        continue
+
+    if current_word == word:
+        current_count += count
+    else:
+        if current_word is not None:
+            print(f"{current_word}\t{current_count}")
+        current_word = word
+        current_count = count
+
+if current_word is not None:
+    print(f"{current_word}\t{current_count}")
+
+\end{lstlisting}
+
+\subsection{Notes on tokenization and normalization}
+The mapper uses a simple regular expression ``\w+'' to match words. This is language-agnostic for ASCII and basic Unicode word characters. For more advanced cases (e.g., stemming, stop words, languages with no spaces), the mapper would be extended to use language-specific tokenizers or NLP libraries.
+
+\section{Figure: Data flow}
+\begin{figure}[h!]
+\centering
+\begin{tikzpicture}[node distance=1.5cm, auto, >=latex']
+\node (in) [draw, rectangle, minimum width=3cm] {Input file};
+\node (map) [draw, rectangle, below of=in] {Mapper(s)};
+\node (shuffle) [draw, rectangle, below of=map] {Shuffle \& Sort};
+\node (reduce) [draw, rectangle, below of=shuffle] {Reducer(s)};
+\node (out) [draw, rectangle, below of=reduce] {Output};
+
+\draw[->] (in) -- (map);
+\draw[->] (map) -- (shuffle);
+\draw[->] (shuffle) -- (reduce);
+\draw[->] (reduce) -- (out);
+\end{tikzpicture}
+\caption{MapReduce pipeline for Word Count}
+\end{figure}
+
+\section{Framework vs. User code responsibilities}
+\begin{itemize}
+\item \textbf{Framework (Hadoop Streaming / MapReduce):}
+\begin{itemize}
+\item Splits input files into input splits and feeds them to Mapper tasks.
+\item Handles data transfer: collects Mapper outputs, performs shuffle and sort, partitions keys and sends grouped key/value lists to the appropriate Reducer.
+\item Retries failed tasks, schedules tasks on cluster nodes, provides logs and counters.
+\end{itemize}
+\item \textbf{User code (Mapper/Reducer scripts):}
+\begin{itemize}
+\item Implements the domain logic: how to parse lines, extract keys and values, and how to aggregate values.
+\item Responsible for producing correctly formatted key/value pairs (tab-separated here) on stdout.
+\item Should be robust to malformed input and should use deterministic, stateless processing.
+\end{itemize}
+\end{itemize}
+
+\section{How to run using UNIX pipes}
+\begin{verbatim}
+cat input.txt | ./mapper.py | sort | ./reducer.py > wordcounts.txt
+\end{verbatim}
+This pipeline emulates the Hadoop streaming shuffle by sorting mapper output before feeding the reducer.
+
+\section{Sample input / expected output}
+\begin{verbatim}
+Input (input.txt):
+Hello world
+hello Hadoop world
+
+Output (wordcounts.txt):
+hello	2
+hadoop	1
+world	2
+\end{verbatim}
+
+\section{Performance considerations and possible improvements}
+\begin{itemize}
+\item Use combiners: since the operation (sum) is associative and commutative, adding a Combiner that runs the same code as the Reducer on mapper outputs reduces network traffic.
+\item Better tokenization: use more advanced tokenizers if input language requires it.
+\item Memory/IO tuning: tune mapreduce.task.io.sort.mb, number of reducers, and input split sizes depending on cluster size and data volume.
+\item Handling very large vocabularies: write outputs to HBase or another key-value store if post-processing requires random access.
+\end{itemize}
+
+\end{document}
